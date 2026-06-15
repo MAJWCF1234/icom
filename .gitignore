@@ -1,2 +1,4 @@
-# See inbox/*.md for messages
-# See nodes.json for peer IPs
+# Local mail — NEVER commit
+.mail-local/
+# Legacy local data
+.icom/

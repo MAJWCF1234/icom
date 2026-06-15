@@ -1,7 +1,10 @@
 {
   "version": 1,
   "port": 7755,
+  "mail_port": 7756,
   "protocol": "icom-v2",
+  "mail_protocol": "icom-mail-v1",
+  "mail_local_path": "%USERPROFILE%\\.icom\\mail",
   "nodes": {
     "majwcf-1": {
       "hostname": "MAJWCF",

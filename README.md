@@ -41,12 +41,13 @@ powershell -NoProfile -File scripts\icom-inbox-fetch.ps1 -Node majwcf-2
 - Protocol: `SEEK|v1` -> `FOUND` -> 5x `DATA`/`PONG` -> `DONE`
 - Full spec: [PROTOCOL.md](PROTOCOL.md)
 
-### Local P2P mail (private — recommended)
-- Port `7756` on Tailscale IP
-- Mail stored **only** on each machine: `%USERPROFILE%\.icom\mail\`
-- **Never on GitHub** — code only in this repo
-- Compose offline, sync when peer is up
-- Full spec: [MAIL.md](MAIL.md)
+### Local P2P mail + files (private — recommended)
+- Port `7756` — mail text + file transfers
+- Mail: `%USERPROFILE%\.icom\mail\`
+- Files: `%USERPROFILE%\.icom\files\received\`
+- **All content base64 on the wire** — images, PDFs, docs, zips
+- Small attachments (<256KB) inline in mail; larger files chunked
+- Specs: [MAIL.md](MAIL.md) + [FILES.md](FILES.md)
 
 ```powershell
 # Server (leave running)
@@ -79,6 +80,8 @@ powershell -NoProfile -File scripts\icom-mail-fetch.ps1
 | `scripts/icom-mail-send.ps1` | Queue private mail |
 | `scripts/icom-mail-sync.ps1` | Deliver/pickup mail |
 | `scripts/icom-mail-fetch.ps1` | Read local inbox |
+| `scripts/icom-files-send.ps1` | Queue file/folder (base64 chunked) |
+| `scripts/icom-files-fetch.ps1` | List received files |
 
 ## For AI agents
 

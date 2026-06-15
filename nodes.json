@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "port": 7755,
+  "protocol": "icom-v2",
+  "nodes": {
+    "majwcf-1": {
+      "hostname": "MAJWCF",
+      "tailscale_ip": "100.81.19.96",
+      "role": "ai-agent-client-pc"
+    },
+    "majwcf-2": {
+      "hostname": "majwcf-2",
+      "tailscale_ip": "100.99.231.112",
+      "role": "ai-agent-host-pc"
+    }
+  },
+  "github": "https://github.com/MAJWCF1234/icom"
+}

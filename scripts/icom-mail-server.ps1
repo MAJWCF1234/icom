@@ -34,6 +34,7 @@ while ($true) {
         $writer.WriteLine("READY|v1|$Node|$MyIP|$ts")
 
         $fileRecv = @{}
+        $mailPending = @{}
 
         # Receive from peer until DONE
         while ($true) {
@@ -42,7 +43,7 @@ while ($true) {
             $preview = if ($line.Length -gt 80) { $line.Substring(0, 80) + "..." } else { $line }
             Write-IcomLog "IN  $preview"
             if ($line -match '^DONE\|') { break }
-            Receive-IcomLine -Line $line -Node $Node -Writer $writer -Remote $remote -FileRecv $fileRecv
+            Receive-IcomLine -Line $line -Node $Node -Writer $writer -Remote $remote -FileRecv $fileRecv -MailPending $mailPending
         }
         Finalize-ReceivedFiles $fileRecv $Node $writer
 
@@ -50,9 +51,7 @@ while ($true) {
         foreach ($f in Get-ChildItem (Join-Path $script:MailRoot "outbox") -Filter "*.json" -EA SilentlyContinue) {
             $m = Read-MailFile $f.FullName
             if ($m.to -ne $peerNode) { continue }
-            $writer.WriteLine((Format-MailLine $m))
-            $ack = $reader.ReadLine()
-            if ($ack -match "^ACK\|v1\|$($m.id)") {
+            if (Send-MailTransfer $m $writer $reader) {
                 $m.status = "sent"; $m.sent = (Get-Date -Format o)
                 Save-MailFile "sent" $m; Remove-Item $f.FullName -Force
             }

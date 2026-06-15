@@ -65,16 +65,51 @@ function Read-MailFile([string]$Path) { Read-Json $Path }
 
 function Format-MailLine($Mail) {
     $subj = ($Mail.subject -replace '\|', '/')
+    $attachCount = if ($Mail.attachments) { $Mail.attachments.Count } else { 0 }
+    if ($attachCount -gt 0) {
+        return "MAIL|v1|$($Mail.id)|$($Mail.from)|$($Mail.to)|$subj|$($Mail.body_b64)|$attachCount"
+    }
     return "MAIL|v1|$($Mail.id)|$($Mail.from)|$($Mail.to)|$subj|$($Mail.body_b64)"
 }
 
 function Parse-MailLine([string]$Line) {
-    $p = $Line -split '\|', 7
+    $p = $Line -split '\|', 8
     if ($p.Count -lt 7 -or $p[0] -ne 'MAIL') { return $null }
+    $attachCount = if ($p.Count -ge 8 -and $p[7] -match '^\d+$') { [int]$p[7] } else { 0 }
     return [ordered]@{
         id = $p[2]; from = $p[3]; to = $p[4]; subject = $p[5]
-        body_b64 = $p[6]; timestamp = (Get-Date -Format o)
+        body_b64 = $p[6]; attachments = @(); expectedAttachments = $attachCount
+        timestamp = (Get-Date -Format o)
     }
+}
+
+function Complete-MailDelivery($Mail, [string]$Node, $Writer) {
+    if ($Mail.to -ne $Node) { return }
+    $Mail.status = "delivered"
+    $Mail.received = (Get-Date -Format o)
+    if ($Mail.PSObject.Properties.Name -contains 'expectedAttachments') {
+        $Mail.PSObject.Properties.Remove('expectedAttachments')
+    }
+    Save-MailFile "inbox" $Mail
+    $Writer.WriteLine("ACK|v1|$($Mail.id)")
+    Write-IcomLog "OUT ACK mail $($Mail.id)"
+}
+
+function Send-MailTransfer($Mail, $Writer, $Reader) {
+    $line = Format-MailLine $Mail
+    $Writer.WriteLine($line)
+    Write-IcomLog "OUT $($line.Substring(0, [Math]::Min(80, $line.Length)))..."
+    $attachCount = if ($Mail.attachments) { $Mail.attachments.Count } else { 0 }
+    for ($i = 0; $i -lt $attachCount; $i++) {
+        $a = $Mail.attachments[$i]
+        $name = ($a.filename -replace '\|', '/')
+        $aline = "ATTACH|v1|$($Mail.id)|$i|$name|$($a.mime)|$($a.size)|$($a.data_b64)"
+        $Writer.WriteLine($aline)
+        Write-IcomLog "OUT ATTACH|v1|$($Mail.id)|$i|$name ($($a.size) bytes)"
+    }
+    $ack = $Reader.ReadLine()
+    Write-IcomLog "IN  $ack"
+    return ($ack -match "^ACK\|v1\|$($Mail.id)")
 }
 
 # --- File helpers ---
@@ -159,15 +194,16 @@ function Send-FileTransfer($Manifest, $Writer, $Reader, [string]$OutboxDir) {
 
 function Receive-IcomLine {
     param([string]$Line, [string]$Node, $Writer, [string]$Remote,
-           [hashtable]$FileRecv = $null)
+           [hashtable]$FileRecv = $null, [hashtable]$MailPending = $null)
 
     if ($Line -match '^MAIL\|') {
         $parsed = Parse-MailLine $Line
-        if ($parsed -and $parsed.to -eq $Node) {
-            $parsed.status = "delivered"; $parsed.received = (Get-Date -Format o)
-            Save-MailFile "inbox" $parsed
-            $Writer.WriteLine("ACK|v1|$($parsed.id)")
-            Write-IcomLog "OUT ACK mail $($parsed.id)"
+        if (-not $parsed -or $parsed.to -ne $Node) { return }
+        if ($parsed.expectedAttachments -eq 0) {
+            Complete-MailDelivery $parsed $Node $Writer
+        } else {
+            $MailPending[$parsed.id] = $parsed
+            Write-IcomLog "RECV MAIL $($parsed.id) awaiting $($parsed.expectedAttachments) attachment(s)"
         }
         return
     }
@@ -186,25 +222,48 @@ function Receive-IcomLine {
     }
 
     if ($Line -match '^FILECHUNK\|v1\|([^|]+)\|(\d+)/(\d+)\|(.+)$') {
-        $id = $Matches[1]; $idx = [int]$Matches[2]
+        $id = $Matches[1]; $idx = [int]$Matches[2]; $total = [int]$Matches[3]
+        if (-not $FileRecv.ContainsKey($id)) { return }
         Set-Content (Join-Path $FileRecv[$id].chunkDir "$idx.b64") $Matches[4] -NoNewline -Encoding ASCII
+        if ($idx + 1 -eq $total) {
+            $m = $FileRecv[$id]
+            if ($m.to -eq $Node) {
+                $dest = Save-ReceivedFile $m $m.chunkDir
+                Remove-Item $m.chunkDir -Recurse -Force -ErrorAction SilentlyContinue
+                $Writer.WriteLine("ACK|v1|$id")
+                Write-IcomLog "OUT ACK file $id -> $dest"
+            }
+            $FileRecv.Remove($id)
+        }
         return
     }
 
     if ($Line -match '^ATTACH\|v1\|([^|]+)\|(\d+)\|([^|]+)\|([^|]+)\|(\d+)\|(.+)$') {
-        # ATTACH|v1|mailid|index|filename|mime|size|data_b64
-        return  # handled inline in mail JSON; wire format for future
+        $mailId = $Matches[1]
+        if (-not $MailPending.ContainsKey($mailId)) { return }
+        $MailPending[$mailId].attachments += [ordered]@{
+            filename = $Matches[3]; mime = $Matches[4]
+            size = [int]$Matches[5]; data_b64 = $Matches[6]
+        }
+        Write-IcomLog "RECV ATTACH $mailId $($Matches[3])"
+        if ($MailPending[$mailId].attachments.Count -eq $MailPending[$mailId].expectedAttachments) {
+            $mail = $MailPending[$mailId]
+            $MailPending.Remove($mailId)
+            Complete-MailDelivery $mail $Node $Writer
+        }
+        return
     }
 }
 
 function Finalize-ReceivedFiles([hashtable]$FileRecv, [string]$Node, $Writer) {
-    foreach ($id in $FileRecv.Keys) {
+    foreach ($id in @($FileRecv.Keys)) {
         $m = $FileRecv[$id]
         if ($m.to -ne $Node) { continue }
         $dest = Save-ReceivedFile $m $m.chunkDir
         Remove-Item $m.chunkDir -Recurse -Force -ErrorAction SilentlyContinue
         $Writer.WriteLine("ACK|v1|$id")
-        Write-IcomLog "OUT ACK file $id -> $dest"
+        Write-IcomLog "OUT ACK file $id (finalize) -> $dest"
+        $FileRecv.Remove($id)
     }
 }
 

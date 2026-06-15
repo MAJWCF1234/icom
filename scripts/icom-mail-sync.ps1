@@ -31,15 +31,14 @@ $ready = $reader.ReadLine()
 if ($ready -notmatch '^READY\|') { throw "Bad sync: $ready" }
 
 $fileRecv = @{}
+$mailPending = @{}
 
 # Push mail
 $mailCount = 0
 foreach ($f in Get-ChildItem (Join-Path $script:MailRoot "outbox") -Filter "*.json" -EA SilentlyContinue) {
     $m = Read-MailFile $f.FullName
     if ($m.to -ne $PeerNode) { continue }
-    $writer.WriteLine((Format-MailLine $m))
-    $ack = $reader.ReadLine()
-    if ($ack -match "^ACK\|v1\|$($m.id)") {
+    if (Send-MailTransfer $m $writer $reader) {
         $m.status = "sent"; Save-MailFile "sent" $m; Remove-Item $f.FullName -Force
         $mailCount++
     }
@@ -66,10 +65,10 @@ while ($true) {
     $line = $reader.ReadLine()
     if (-not $line) { break }
     if ($line -match '^DONE\|') { break }
-    Receive-IcomLine -Line $line -Node $Node -Writer $writer -FileRecv $fileRecv
+    Receive-IcomLine -Line $line -Node $Node -Writer $writer -FileRecv $fileRecv -MailPending $mailPending
 }
 Finalize-ReceivedFiles $fileRecv $Node $writer
 
 $tcp.Close()
-Write-IcomLog "SYNC DONE — mail:$mailCount files:$fileCount"
+Write-IcomLog "SYNC DONE - mail:$mailCount files:$fileCount"
 Write-Host "Sync complete. icom-mail-fetch.ps1 / icom-files-fetch.ps1 to read."

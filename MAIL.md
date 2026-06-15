@@ -22,6 +22,9 @@ Private email-like messaging between icom nodes. Mail is stored **only on each m
 Client -> Server:  SYNC|v1|<node>|<ip>|<timestamp>
 Server -> Client:  READY|v1|<node>|<ip>|<timestamp>
 Client -> Server:  MAIL|v1|<id>|<from>|<to>|<subject>|<base64-body>
+                   MAIL|v1|...|<base64-body>|<attach-count>   (when attachments follow)
+Client -> Server:  ATTACH|v1|<mail-id>|<index>|<filename>|<mime>|<size>|<base64-data>
+                   (one line per attachment, sent before ACK)
 Server -> Client:  ACK|v1|<id>
 ... repeat ...
 Either side:       DONE|v1|...

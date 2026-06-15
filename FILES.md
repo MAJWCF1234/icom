@@ -60,10 +60,16 @@ powershell -NoProfile -File scripts\icom-files-fetch.ps1 -OpenFolder
 ```
 FILEMETA|v1|<id>|<from>|<to>|<filename>|<mime>|<size>|<chunk-count>
 FILECHUNK|v1|<id>|<index>/<total>|<base64-bytes>
-ACK|v1|<id>
+ACK|v1|<id>          <- sent immediately after last chunk (not after DONE)
 ```
 
-Mail body remains: `MAIL|v1|...|<base64-utf8-body>`
+Inline mail attachments (< 256 KB):
+
+```
+MAIL|v1|<id>|<from>|<to>|<subject>|<base64-body>|<attach-count>
+ATTACH|v1|<mail-id>|<index>|<filename>|<mime>|<size>|<base64-data>
+ACK|v1|<mail-id>
+```
 
 ## Supported types
 
